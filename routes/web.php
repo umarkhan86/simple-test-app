@@ -2,17 +2,22 @@
 
 use Illuminate\Support\Facades\Route;
 
-/*
-|--------------------------------------------------------------------------
-| Web Routes
-|--------------------------------------------------------------------------
-|
-| Here is where you can register web routes for your application. These
-| routes are loaded by the RouteServiceProvider within a group which
-| contains the "web" middleware group. Now create something great!
-|
-*/
-
 Route::get('/', function () {
     return view('welcome');
+});
+
+// Add this test route
+Route::get('/test', function () {
+    return response()->json([
+        'status' => 'success',
+        'message' => 'Laravel is working!',
+        'version' => app()->version(),
+        'environment' => app()->environment(),
+        'timestamp' => now()->toDateTimeString(),
+    ]);
+});
+
+// Health check route for ALB
+Route::get('/health', function () {
+    return response()->json(['status' => 'healthy'], 200);
 });

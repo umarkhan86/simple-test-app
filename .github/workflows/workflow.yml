@@ -1,0 +1,141 @@
+name: CI CD to ECS for (MoneyFlex)
+
+on:
+  push:
+    branches:
+      - main
+      - stagging
+
+concurrency:
+  group: moneyflex-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  # ============================================================
+  # JOB 1 — BUILD & PUSH DOCKER IMAGE
+  # ============================================================
+  build:
+    runs-on: ubuntu-latest
+
+    outputs:
+      image_tag: ${{ steps.vars.outputs.tag }}
+      aws_region: ${{ steps.envvalues.outputs.aws_region }}
+      repo: ${{ steps.envvalues.outputs.repo }}
+      cluster: ${{ steps.envvalues.outputs.cluster }}
+      service: ${{ steps.envvalues.outputs.service }}
+      task: ${{ steps.envvalues.outputs.task }}
+      container: ${{ steps.envvalues.outputs.container }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set environment values per branch
+        id: envvalues
+        run: |
+          if [[ "${GITHUB_REF##*/}" == "main" ]]; then
+            echo "cluster=abcabcabc" >> $GITHUB_OUTPUT
+            echo "service=task-def-service-365spwxy" >> $GITHUB_OUTPUT
+            echo "task=task-def" >> $GITHUB_OUTPUT
+            echo "repo=767828751245.dkr.ecr.us-east-1.amazonaws.com/testlaravel" >> $GITHUB_OUTPUT
+            echo "container=laravel" >> $GITHUB_OUTPUT
+            echo "aws_region=us-east-1" >> $GITHUB_OUTPUT
+          else
+            echo "cluster=moneyflex-staging-cluster" >> $GITHUB_OUTPUT
+            echo "service=moneyflex-staging-service" >> $GITHUB_OUTPUT
+            echo "task=moneyflex-staging-td" >> $GITHUB_OUTPUT
+            echo "repo=767398014935.dkr.ecr.me-central-1.amazonaws.com/moneyflex-ecr-staging" >> $GITHUB_OUTPUT
+            echo "container=moneyflex-staging-container" >> $GITHUB_OUTPUT
+            echo "aws_region=me-central-1" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create .env file
+        run: |
+          if [[ "${GITHUB_REF##*/}" == "main" ]]; then
+            echo "${{ secrets.ENV_PROD_FILE }}" > .env
+          else
+            echo "${{ secrets.ENV_STAGING_FILE }}" > .env
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ steps.envvalues.outputs.aws_region }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          region: ${{ steps.envvalues.outputs.aws_region }}
+
+      - name: Generate image tag
+        id: vars
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          TAG="v-${SHORT_SHA}-${TIMESTAMP}"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+
+      - name: Build & push Docker image
+        env:
+          REPO: ${{ steps.envvalues.outputs.repo }}
+          TAG: ${{ steps.vars.outputs.tag }}
+        run: |
+          docker build -t $REPO:$TAG .
+          docker tag $REPO:$TAG $REPO:latest
+          docker push $REPO:$TAG
+          docker push $REPO:latest
+
+      - name: Cleanup
+        if: always()
+        run: rm -f .env
+
+
+  # ============================================================
+  # JOB 2 — DEPLOY TO ECS
+  # Runs only after BUILD job is complete
+  # ============================================================
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ needs.build.outputs.aws_region }}
+
+      - name: Download current task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition ${{ needs.build.outputs.task }} \
+            --query taskDefinition | \
+            jq 'del(.taskDefinitionArn, .revision, .status, .compatibilities, .requiresAttributes, .registeredAt, .deregisteredAt, .tags, .enableFaultInjection)' \
+            > task-definition.json
+
+      - name: Update task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ needs.build.outputs.container }}
+          image: ${{ needs.build.outputs.repo }}:${{ needs.build.outputs.image_tag }}
+
+      - name: Deploy to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ needs.build.outputs.service }}
+          cluster: ${{ needs.build.outputs.cluster }}
+          wait-for-service-stability: true
+
+      - name: Cleanup
+        if: always()
+        run: rm -f task-definition.json
