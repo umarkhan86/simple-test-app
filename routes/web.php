@@ -10,7 +10,7 @@ Route::get('/', function () {
 Route::get('/test', function () {
     return response()->json([
         'status' => 'success',
-        'message' => 'Laravel is working!',
+        'message' => 'Laravel is working!2nd commit',
         'version' => app()->version(),
         'environment' => app()->environment(),
         'timestamp' => now()->toDateTimeString(),
