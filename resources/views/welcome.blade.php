@@ -44,7 +44,7 @@
 <body>
     <div class="container">
         <h1>🚀 Laravel Deployment Test</h1>
-        <div class="success">✅ Deployment Successful!</div>
+        <div class="success">✅ Deployment Successful!2mddd</div>
         <div class="info">
             <p><strong>Laravel Version:</strong> {{ app()->version() }}</p>
             <p><strong>Environment:</strong> {{ app()->environment() }}</p>
