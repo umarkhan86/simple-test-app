@@ -78,15 +78,7 @@ jobs:
           TAG="v-${SHORT_SHA}-${TIMESTAMP}"
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
 
-      - name: Build & push Docker image
-        env:
-          REPO: ${{ steps.envvalues.outputs.repo }}
-          TAG: ${{ steps.vars.outputs.tag }}
-        run: |
-          docker build -t $REPO:$TAG .
-          docker tag $REPO:$TAG $REPO:latest
-          docker push $REPO:$TAG
-          docker push $REPO:latest
+     
 
       - name: Cleanup
         if: always()
