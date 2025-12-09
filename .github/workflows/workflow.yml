@@ -1,4 +1,4 @@
-name: CI CD to ECS for (MoneyFlex) 
+name: CI CD to ECS for (MoneyFlex)
 
 on:
   push:
