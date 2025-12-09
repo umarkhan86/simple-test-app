@@ -28,7 +28,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@e04e1d4e8b8645428c01ad6d7042cb0e1e4507f7
         with:
           php-version: '8.2'  # Change to your PHP version (8.1, 8.2, 8.3, etc.)
           coverage: xdebug    # Enable code coverage with Xdebug
