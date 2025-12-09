@@ -1,4 +1,4 @@
-name: CI CD to ECS for (MoneyFlex)
+name: CI CD to ECS for (MoneyFlex) with SonarQube
 
 on:
   push:
@@ -13,10 +13,70 @@ concurrency:
 jobs:
 
   # ============================================================
-  # JOB 1 — BUILD & PUSH DOCKER IMAGE
+  # JOB 1 — CODE QUALITY ANALYSIS WITH SONARQUBE
+  # This job runs first to analyze code quality before building
+  # ============================================================
+  sonarqube:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          # Fetch full history for better SonarQube analysis
+          # This helps SonarQube track code evolution and blame information
+          fetch-depth: 0
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'  # Change to your PHP version (8.1, 8.2, 8.3, etc.)
+          coverage: xdebug    # Enable code coverage with Xdebug
+          tools: composer
+
+      - name: Install Composer Dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      # Optional: Run PHPUnit tests with coverage
+      # This generates coverage report that SonarQube can use
+      - name: Run PHPUnit Tests with Coverage
+        run: |
+          # Create directory for test results
+          mkdir -p build/logs
+          # Run tests and generate coverage in Clover XML format
+          vendor/bin/phpunit --coverage-clover=build/logs/clover.xml --log-junit=build/logs/junit.xml
+        continue-on-error: true  # Don't fail the workflow if tests fail
+
+      # Main SonarQube scan step
+      - name: SonarQube Scan
+        uses: sonarsource/sonarqube-scan-action@master
+        env:
+          # SONAR_TOKEN: Authentication token from SonarQube Cloud
+          # Get this from: https://sonarcloud.io/account/security
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          # SONAR_HOST_URL: URL of your SonarQube instance
+          # For SonarQube Cloud, this is always https://sonarcloud.io
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+      # Optional but recommended: Wait for Quality Gate result
+      # This will fail the pipeline if code doesn't meet quality standards
+      - name: SonarQube Quality Gate Check
+        uses: sonarsource/sonarqube-quality-gate-action@master
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        # Uncomment the line below if you want to proceed even if quality gate fails
+        # continue-on-error: true
+
+
+  # ============================================================
+  # JOB 2 — BUILD & PUSH DOCKER IMAGE
+  # This runs only after SonarQube analysis passes
   # ============================================================
   build:
     runs-on: ubuntu-latest
+    # Wait for SonarQube job to complete successfully
+    needs: sonarqube
 
     outputs:
       image_tag: ${{ steps.vars.outputs.tag }}
@@ -26,22 +86,28 @@ jobs:
       service: ${{ steps.envvalues.outputs.service }}
       task: ${{ steps.envvalues.outputs.task }}
       container: ${{ steps.envvalues.outputs.container }}
+      environment: ${{ steps.envvalues.outputs.environment }}
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # Determine which environment we're deploying to based on branch
       - name: Set environment values per branch
         id: envvalues
         run: |
           if [[ "${GITHUB_REF##*/}" == "main" ]]; then
+            # Production environment configuration
+            echo "environment=production" >> $GITHUB_OUTPUT
             echo "cluster=abcabcabc" >> $GITHUB_OUTPUT
             echo "service=task-def-service-365spwxy" >> $GITHUB_OUTPUT
             echo "task=task-def" >> $GITHUB_OUTPUT
             echo "repo=767828751245.dkr.ecr.us-east-1.amazonaws.com/testlaravel" >> $GITHUB_OUTPUT
             echo "container=laravel" >> $GITHUB_OUTPUT
-            echo "aws_region=us-east-1" >> $GITHUB_OUTPUT
+            echo "aws_region=me-central-1" >> $GITHUB_OUTPUT
           else
+            # Staging environment configuration
+            echo "environment=staging" >> $GITHUB_OUTPUT
             echo "cluster=moneyflex-staging-cluster" >> $GITHUB_OUTPUT
             echo "service=moneyflex-staging-service" >> $GITHUB_OUTPUT
             echo "task=moneyflex-staging-td" >> $GITHUB_OUTPUT
@@ -50,6 +116,7 @@ jobs:
             echo "aws_region=me-central-1" >> $GITHUB_OUTPUT
           fi
 
+      # Create Laravel .env file based on environment
       - name: Create .env file
         run: |
           if [[ "${GITHUB_REF##*/}" == "main" ]]; then
@@ -58,6 +125,7 @@ jobs:
             echo "${{ secrets.ENV_STAGING_FILE }}" > .env
           fi
 
+      # Configure AWS credentials for ECR access
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -65,11 +133,13 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ steps.envvalues.outputs.aws_region }}
 
+      # Login to Amazon ECR to push images
       - name: Login to ECR
         uses: aws-actions/amazon-ecr-login@v2
         with:
           region: ${{ steps.envvalues.outputs.aws_region }}
 
+      # Generate unique tag for this build using git commit hash and timestamp
       - name: Generate image tag
         id: vars
         run: |
@@ -78,15 +148,19 @@ jobs:
           TAG="v-${SHORT_SHA}-${TIMESTAMP}"
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
 
-     
+      # Build Docker image and push to ECR with both versioned tag and latest
+      - name: Build & push Docker image
+        env:
+          REPO: ${{ steps.envvalues.outputs.repo }}
+          TAG: ${{ steps.vars.outputs.tag }}
+        run: |
+          docker build -t $REPO:$TAG .
+          docker tag $REPO:$TAG $REPO:latest
+          docker push $REPO:$TAG
+          docker push $REPO:latest
 
+      # Clean up sensitive .env file
       - name: Cleanup
         if: always()
         run: rm -f .env
 
-
-  # ============================================================
-  # JOB 2 — DEPLOY TO ECS
-  # Runs only after BUILD job is complete
-  # ============================================================
- #
