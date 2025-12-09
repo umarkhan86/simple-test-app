@@ -39,13 +39,13 @@ jobs:
 
       # Optional: Run PHPUnit tests with coverage
       # This generates coverage report that SonarQube can use
-    #  - name: Run PHPUnit Tests with Coverage
-    #    run: |
-    #      # Create directory for test results
-    #      mkdir -p build/logs
+      - name: Run PHPUnit Tests with Coverage
+        run: |
+          # Create directory for test results
+          mkdir -p build/logs
           # Run tests and generate coverage in Clover XML format
-   #       vendor/bin/phpunit --coverage-clover=build/logs/clover.xml --log-junit=build/logs/junit.xml
-   #     continue-on-error: true  # Don't fail the workflow if tests fail
+          vendor/bin/phpunit --coverage-clover=build/logs/clover.xml --log-junit=build/logs/junit.xml
+        continue-on-error: true  # Don't fail the workflow if tests fail
 
       # Main SonarQube scan step
       - name: SonarQube Scan
@@ -58,15 +58,23 @@ jobs:
           # For SonarQube Cloud, this is always https://sonarcloud.io
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
 
-      # Optional but recommended: Wait for Quality Gate result
-      # This will fail the pipeline if code doesn't meet quality standards
+      # Optional: Wait for Quality Gate result
+      # Currently set to warn-only mode (continue-on-error: true)
+      # Once critical issues are fixed, remove continue-on-error to enforce quality
       - name: SonarQube Quality Gate Check
         uses: sonarsource/sonarqube-quality-gate-action@master
         timeout-minutes: 5
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        # Uncomment the line below if you want to proceed even if quality gate fails
-          continue-on-error: true
+        continue-on-error: true  # Pipeline continues even if quality gate fails
+        
+      # Optional: Show warning when quality gate fails
+      - name: Quality Gate Status Warning
+        if: failure()
+        run: |
+          echo "⚠️  WARNING: Quality Gate failed!"
+          echo "📊 Check SonarCloud dashboard for details: https://sonarcloud.io"
+          echo "🔧 Pipeline will continue, but please review and fix issues"
 
 
   # ============================================================
@@ -164,3 +172,63 @@ jobs:
         if: always()
         run: rm -f .env
 
+
+  # ============================================================
+  # JOB 3 — DEPLOY TO ECS
+  # Runs only after BUILD job is complete
+  # ============================================================
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Configure AWS credentials for ECS deployment
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ needs.build.outputs.aws_region }}
+
+      # Get the current ECS task definition and clean it for registration
+      - name: Download current task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition ${{ needs.build.outputs.task }} \
+            --query taskDefinition | \
+            jq 'del(.taskDefinitionArn, .revision, .status, .compatibilities, .requiresAttributes, .registeredAt, .deregisteredAt, .tags, .enableFaultInjection)' \
+            > task-definition.json
+
+      # Update task definition with new Docker image
+      - name: Update task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ needs.build.outputs.container }}
+          image: ${{ needs.build.outputs.repo }}:${{ needs.build.outputs.image_tag }}
+
+      # Deploy updated task definition to ECS service
+      - name: Deploy to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ needs.build.outputs.service }}
+          cluster: ${{ needs.build.outputs.cluster }}
+          wait-for-service-stability: true
+
+      # Send deployment notification (optional)
+      - name: Deployment Success Notification
+        if: success()
+        run: |
+          echo "✅ Successfully deployed to ${{ needs.build.outputs.environment }}"
+          echo "🏷️  Image Tag: ${{ needs.build.outputs.image_tag }}"
+          echo "🌍 Region: ${{ needs.build.outputs.aws_region }}"
+
+      # Clean up task definition file
+      - name: Cleanup
+        if: always()
+        run: rm -f task-definition.json
