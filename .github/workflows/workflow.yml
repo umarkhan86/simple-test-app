@@ -66,7 +66,7 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         # Uncomment the line below if you want to proceed even if quality gate fails
-         continue-on-error: true
+          continue-on-error: true
 
 
   # ============================================================
