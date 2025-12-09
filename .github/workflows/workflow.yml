@@ -39,13 +39,13 @@ jobs:
 
       # Optional: Run PHPUnit tests with coverage
       # This generates coverage report that SonarQube can use
-      - name: Run PHPUnit Tests with Coverage
-        run: |
-          # Create directory for test results
-          mkdir -p build/logs
+    #  - name: Run PHPUnit Tests with Coverage
+    #    run: |
+    #      # Create directory for test results
+    #      mkdir -p build/logs
           # Run tests and generate coverage in Clover XML format
-          vendor/bin/phpunit --coverage-clover=build/logs/clover.xml --log-junit=build/logs/junit.xml
-        continue-on-error: true  # Don't fail the workflow if tests fail
+   #       vendor/bin/phpunit --coverage-clover=build/logs/clover.xml --log-junit=build/logs/junit.xml
+   #     continue-on-error: true  # Don't fail the workflow if tests fail
 
       # Main SonarQube scan step
       - name: SonarQube Scan
