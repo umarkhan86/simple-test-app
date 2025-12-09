@@ -60,13 +60,7 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         continue-on-error: true  # Pipeline continues even if quality gate fails
         
-      # Optional: Show warning when quality gate fails
-      - name: Quality Gate Status Warning
-        if: failure()
-        run: |
-          echo "⚠️  WARNING: Quality Gate failed!"
-          echo "📊 Check SonarCloud dashboard for details: https://sonarcloud.io"
-          echo "🔧 Pipeline will continue, but please review and fix issues"
+
 
 
   # ============================================================
@@ -111,7 +105,7 @@ jobs:
             echo "cluster=moneyflex-staging-cluster" >> $GITHUB_OUTPUT
             echo "service=moneyflex-staging-service" >> $GITHUB_OUTPUT
             echo "task=moneyflex-staging-td" >> $GITHUB_OUTPUT
-            echo "repo=767398014935.dkr.ecr.me-central-1.amazonaws.com/moneyflex-ecr-staging" >> $GITHUB_OUTPUT
+            echo "repo=767828751245.dkr.ecr.us-east-1.amazonaws.com/moneyflex-ecr-staging" >> $GITHUB_OUTPUT
             echo "container=moneyflex-staging-container" >> $GITHUB_OUTPUT
             echo "aws_region=me-central-1" >> $GITHUB_OUTPUT
           fi
